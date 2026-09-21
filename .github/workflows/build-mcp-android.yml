@@ -1,0 +1,70 @@
+name: Build MCP Android APK
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout Android build branch
+        uses: actions/checkout@v4
+        with:
+          ref: mcp-android-build
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 8.10.2
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Build APK
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          java -version
+          gradle --version
+          gradle --no-daemon :app:assembleDebug --stacktrace
+
+      - name: Prepare release
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk dist/MCP-Android-Extensions-debug.apk
+          sha256sum dist/MCP-Android-Extensions-debug.apk | tee dist/MCP-Android-Extensions-debug.apk.sha256
+          cat > dist/BUILD_INFO.txt <<'EOF'
+          Official source repository: gocsilva/MCP_ANDROID_EXTENSIONS
+          Official source main SHA: 4d65943b0a6cc01d41e0c386f4cccab79b4254d0
+          Build mirror branch: gocsilva/CreateAndFight@mcp-android-build
+          Build mirror SHA: 7e0a9373285092ac5cbf80714f0b6599b3673f87
+          Build command: gradle --no-daemon :app:assembleDebug --stacktrace
+          EOF
+          echo "Built at: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> dist/BUILD_INFO.txt
+          cat dist/MCP-Android-Extensions-debug.apk.sha256 >> dist/BUILD_INFO.txt
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MCP-Android-Extensions-debug
+          path: dist/
+          retention-days: 30
+
+      - name: Publish direct-download release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          TAG="mcp-android-debug-4d65943"
+          gh release delete "$TAG" -y --cleanup-tag 2>/dev/null || true
+          gh release create "$TAG"             dist/MCP-Android-Extensions-debug.apk             dist/MCP-Android-Extensions-debug.apk.sha256             dist/BUILD_INFO.txt             --target 7e0a9373285092ac5cbf80714f0b6599b3673f87             --title "MCP Android Extensions Debug APK"             --notes "Remote build of MCP_ANDROID_EXTENSIONS main SHA 4d65943b0a6cc01d41e0c386f4cccab79b4254d0."
