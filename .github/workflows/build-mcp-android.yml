@@ -1,0 +1,73 @@
+name: Build MCP Android APK
+
+on:
+  push:
+    branches:
+      - mcp-android-build
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout build mirror
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 8.10.2
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Show Android environment
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          java -version
+          gradle --version
+
+      - name: Assemble debug APK
+        run: gradle --no-daemon :app:assembleDebug --stacktrace
+
+      - name: Prepare release files
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk dist/MCP-Android-Extensions-debug.apk
+          sha256sum dist/MCP-Android-Extensions-debug.apk | tee dist/MCP-Android-Extensions-debug.apk.sha256
+          cat > dist/BUILD_INFO.txt <<'EOF'
+          Official source repository: gocsilva/MCP_ANDROID_EXTENSIONS
+          Official source main SHA: 4d65943b0a6cc01d41e0c386f4cccab79b4254d0
+          Build command: gradle --no-daemon :app:assembleDebug --stacktrace
+          Build mirror: gocsilva/CreateAndFight branch mcp-android-build
+          EOF
+          echo "Builder commit: $GITHUB_SHA" >> dist/BUILD_INFO.txt
+          echo "Built at: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> dist/BUILD_INFO.txt
+          cat dist/MCP-Android-Extensions-debug.apk.sha256 >> dist/BUILD_INFO.txt
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MCP-Android-Extensions-debug
+          path: |
+            dist/MCP-Android-Extensions-debug.apk
+            dist/MCP-Android-Extensions-debug.apk.sha256
+            dist/BUILD_INFO.txt
+          retention-days: 30
+
+      - name: Publish APK release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          TAG="mcp-android-debug-${GITHUB_SHA::7}"
+          gh release create "$TAG"             dist/MCP-Android-Extensions-debug.apk             dist/MCP-Android-Extensions-debug.apk.sha256             dist/BUILD_INFO.txt             --target "$GITHUB_SHA"             --title "MCP Android Extensions Debug APK"             --notes "Debug APK compiled remotely from MCP_ANDROID_EXTENSIONS main source SHA 4d65943b0a6cc01d41e0c386f4cccab79b4254d0."
